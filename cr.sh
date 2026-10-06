@@ -299,7 +299,31 @@ install_chart_releaser() {
       architecture=linux_arm64
     fi
     echo "Installing chart-releaser on $install_dir..."
-    curl -sSLo cr.tar.gz "https://github.com/helm/chart-releaser/releases/download/$version/chart-releaser_${version#v}_${architecture}.tar.gz"
+    local tarball="chart-releaser_${version#v}_${architecture}.tar.gz"
+    local base_url="https://github.com/helm/chart-releaser/releases/download/$version"
+    curl -sSLo cr.tar.gz "${base_url}/${tarball}"
+
+    local checksum_http_status
+    checksum_http_status=$(curl -sSLo checksums.txt -w "%{http_code}" "${base_url}/checksums.txt")
+    if [[ "$checksum_http_status" == "200" ]]; then
+      local expected_hash
+      expected_hash=$(grep "  ${tarball}$" checksums.txt | awk '{print $1}')
+      if [[ -n "$expected_hash" ]]; then
+        echo "Verifying checksum for $tarball..."
+        if ! echo "$expected_hash  cr.tar.gz" | sha256sum --check --status; then
+          echo "ERROR: Checksum verification failed for $tarball" >&2
+          rm -f cr.tar.gz checksums.txt
+          exit 1
+        fi
+        echo "Checksum verified."
+      else
+        echo "WARNING: No checksum entry found for $tarball in checksums.txt, skipping verification."
+      fi
+      rm -f checksums.txt
+    else
+      echo "checksums.txt not available (HTTP ${checksum_http_status}), skipping verification."
+    fi
+
     tar -xzf cr.tar.gz -C "$install_dir"
     rm -f cr.tar.gz
   fi
