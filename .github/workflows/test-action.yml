@@ -15,7 +15,12 @@ jobs:
 
     name: Install chart-releaser and test presence in path
     steps:
-    - uses: actions/checkout@v7
+    - name: Harden the runner (Audit all outbound calls)
+      uses: step-security/harden-runner@v2
+      with:
+        egress-policy: audit
+
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - name: Install chart-releaser
       uses: ./
       with:
@@ -49,7 +54,12 @@ jobs:
 
     name: Install chart-releaser and run it
     steps:
-    - uses: actions/checkout@v7
+    - name: Harden the runner (Audit all outbound calls)
+      uses: step-security/harden-runner@v2
+      with:
+        egress-policy: audit
+
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - name: Install chart-releaser
       uses: ./
       env:
