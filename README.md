@@ -17,13 +17,13 @@ A GitHub action to turn a GitHub project into a self-hosted Helm chart repo, usi
 
 ### Inputs
 
-- `version`: The chart-releaser version to use (default: v1.7.0)
+- `version`: The chart-releaser version to use (default: v1.9.0)
 - `config`: Optional config file for chart-releaser. For more information on the config file, see the [documentation](https://github.com/helm/chart-releaser#config-file)
 - `charts_dir`: The charts directory
 - `skip_packaging`: This option, when populated, will skip the packaging step. This allows you to do more advanced packaging of your charts (for example, with the `helm package` command) before this action runs. This action will only handle the indexing and publishing steps.
 - `skip_existing`: Skip package upload if release/tag already exists
-- `skip_upload`: This option, when populated, will skip the upload step. This allows you to do more advanced uploading of your charts (for exemple with OCI based repositories) which doen't require the `index.yaml`.
-- `mark_as_latest`: When you set this to `false`, it will mark the created GitHub release not as 'latest'.
+- `skip_upload`: This option, when populated, will skip the upload step. This allows you to do more advanced uploading of your charts (for example with OCI based repositories) which doesn't require the `index.yaml`.
+- `mark_as_latest`: When set to `false`, the created GitHub release will not be marked as the "latest" release on the repository's releases page.
 - `packages_with_index`: When you set this to `true`, it will upload chart packages directly into publishing branch.
 - `pages_branch`: Name of the branch to be used to push the index and artifacts. (default to: gh-pages but it is not set in the action it is a default value for the chart-releaser binary)
 - `oci_registry_url`: OCI registry URL (e.g. `oci://ghcr.io/myorg/charts`). When set, the action additionally pushes each packaged chart to this OCI registry via `cr push`. For authentication, the recommended approach is to run [`step-security/docker-login-action`](https://github.com/step-security/docker-login-action) before this action so credentials are placed in the local registry credential store; alternatively pass `oci_username` / `oci_password` explicitly.
@@ -124,4 +124,3 @@ When `oci_registry_url` is set, the action pushes each packaged chart to the OCI
 ```
 
 If you prefer to pass credentials directly to the action instead of using `step-security/docker-login-action`, set the `oci_username` and `oci_password` inputs.
-
