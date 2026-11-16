@@ -7,6 +7,20 @@ permissions: {}
 
 jobs:
 
+  test_explicit_charts:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate explicit chart processing
+        run: bash .github/scripts/test-explicit-charts.sh
+
   test_chart_releaser_install_action:
     runs-on: ubuntu-latest
 
@@ -32,8 +46,8 @@ jobs:
         cr version
         CR_VERSION_OUTPUT=$(cr version 2>&1 /dev/null)
         ACTUAL_VERSION=$(echo "$CR_VERSION_OUTPUT" | grep GitVersion | rev | cut -d ' ' -f1 | rev)
-        if [[ $ACTUAL_VERSION != 'v1.7.0' ]]; then
-          echo 'should be v1.7.0'
+        if [[ $ACTUAL_VERSION != 'v1.10.0' ]]; then
+          echo 'should be v1.10.0'
           exit 1
         else
           exit 0
@@ -70,3 +84,24 @@ jobs:
           echo 'should be clean'
           exit 1
         fi
+  test_chart_version_output:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    name: Validate chart_version output
+    steps:
+    - name: Harden the runner (Audit all outbound calls)
+      uses: step-security/harden-runner@v2
+      with:
+        egress-policy: audit
+
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Install Helm for package fixtures
+      uses: step-security/setup-helm@104176d810f424da7451a3fe25620d40c4dfb883 # v5.0.1
+      with:
+        version: v3.14.3
+    - name: Validate chart_version output
+      run: bash .github/scripts/test-chart-version-output.sh
+      shell: bash

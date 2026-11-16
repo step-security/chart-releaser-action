@@ -21,9 +21,9 @@ branding:
   icon: anchor
 inputs:
   version:
-    description: "The chart-releaser version to use (default: v1.9.0)"
+    description: "The chart-releaser version to use (default: v1.10.0)"
     required: false
-    default: v1.9.0
+    default: v1.10.0
   config:
     description: "The relative path to the chart-releaser config file"
     required: false
@@ -31,6 +31,9 @@ inputs:
     description: The charts directory
     required: false
     default: charts
+  charts:
+    description: "Newline-separated chart directories to package without Git change detection. Takes precedence over charts_dir and match_tags; cannot be combined with skip_packaging."
+    required: false
   install_dir:
     description: "Where to install the cr tool"
     required: false
@@ -49,11 +52,14 @@ inputs:
   mark_as_latest:
     description: Mark the created GitHub release as 'latest'
     required: false
-    default: true
+    default: "true"
+  match_tags:
+    description: "The glob to use to filter Git tags (default: all tags)"
+    required: false
   packages_with_index:
     description: "Upload chart packages directly into publishing branch"
     required: false
-    default: false
+    default: "false"
   pages_branch:
     description: "Name of the branch to be used to push the index and artifacts. (default to: gh-pages but it is not set in the action it is a default value for the chart-releaser binary)"
     required: false
@@ -71,7 +77,7 @@ outputs:
     description: "A comma-separated list of charts that were released on this run. Will be an empty string if no updates were detected, will be unset if `--skip_packaging` is used: in the latter case your custom packaging step is responsible for setting its own outputs if you need them."
     value: ${{ steps.release.outputs.changed_charts }}
   chart_version:
-    description: "The version of the most recently generated charts; will be set even if no charts have been updated since the last run."
+    description: "The version of the most recently generated charts; will be empty when explicit charts are supplied."
     value: ${{ steps.release.outputs.chart_version }}
 
 runs:
@@ -122,71 +128,96 @@ runs:
         fi
       shell: bash
     - id: release
+      env:
+        charts_dir: ${{ inputs.charts_dir }}
+        charts: ${{ inputs.charts }}
+        config: ${{ inputs.config }}
+        install_dir: ${{ inputs.install_dir }}
+        install_only: ${{ inputs.install_only }}
+        mark_as_latest: ${{ inputs.mark_as_latest }}
+        match_tags: ${{ inputs.match_tags }}
+        oci_registry_url: ${{ inputs.oci_registry_url }}
+        oci_username: ${{ inputs.oci_username }}
+        oci_password: ${{ inputs.oci_password }}
+        packages_with_index: ${{ inputs.packages_with_index }}
+        pages_branch: ${{ inputs.pages_branch }}
+        skip_existing: ${{ inputs.skip_existing }}
+        skip_packaging: ${{ inputs.skip_packaging }}
+        skip_upload: ${{ inputs.skip_upload }}
+        version: ${{ inputs.version }}
       run: |
         owner=$(cut -d '/' -f 1 <<< "$GITHUB_REPOSITORY")
         repo=$(cut -d '/' -f 2 <<< "$GITHUB_REPOSITORY")
 
         args=(--owner "$owner" --repo "$repo")
-        args+=(--charts-dir "${{ inputs.charts_dir }}")
+        args+=(--charts-dir "$charts_dir")
 
-        if [[ -n "${{ inputs.version }}" ]]; then
-            args+=(--version "${{ inputs.version }}")
+        if [[ -n "$charts" ]]; then
+            args+=(--charts "$charts")
         fi
 
-        if [[ -n "${{ inputs.config }}" ]]; then
-            args+=(--config "${{ inputs.config }}")
+        if [[ -n "$version" ]]; then
+            args+=(--version "$version")
         fi
 
-        if [[ -z "${{ inputs.install_dir }}" ]]; then
-          install="$RUNNER_TOOL_CACHE/cr/${{ inputs.version }}/$(uname -m)"
+        if [[ -n "$config" ]]; then
+            args+=(--config "$config")
+        fi
+
+        if [[ -z "$install_dir" ]]; then
+          install="$RUNNER_TOOL_CACHE/cr/$version/$(uname -m)"
           echo "$install" >> "$GITHUB_PATH"
           args+=(--install-dir "$install")
         else
-          echo "${{ inputs.install_dir }}" >> "$GITHUB_PATH"
-          args+=(--install-dir "${{ inputs.install_dir }}")
+          echo "$install_dir" >> "$GITHUB_PATH"
+          args+=(--install-dir "$install_dir")
         fi
 
-        if [[ -n "${{ inputs.install_only }}" ]]; then
-            args+=(--install-only "${{ inputs.install_only }}")
+        if [[ -n "$install_only" ]]; then
+            args+=(--install-only "$install_only")
         fi
 
-        if [[ -n "${{ inputs.skip_packaging }}" ]]; then
-            args+=(--skip-packaging "${{ inputs.skip_packaging }}")
+        if [[ -n "$skip_packaging" ]]; then
+            args+=(--skip-packaging "$skip_packaging")
         fi
 
-        if [[ -n "${{ inputs.skip_existing }}" ]]; then
-            args+=(--skip-existing "${{ inputs.skip_existing }}")
+        if [[ -n "$skip_existing" ]]; then
+            args+=(--skip-existing "$skip_existing")
         fi
 
-        if [[ -n "${{ inputs.skip_upload }}" ]]; then
-            args+=(--skip-upload "${{ inputs.skip_upload }}")
+        if [[ -n "$skip_upload" ]]; then
+            args+=(--skip-upload "$skip_upload")
         fi
 
-        if [[ -n "${{ inputs.mark_as_latest }}" ]]; then
-            args+=(--mark-as-latest "${{ inputs.mark_as_latest }}")
+        if [[ -n "$mark_as_latest" ]]; then
+            args+=(--mark-as-latest "$mark_as_latest")
         fi
 
-        if [[ -n "${{ inputs.packages_with_index }}" ]]; then
-            args+=(--packages-with-index "${{ inputs.packages_with_index }}")
+        if [[ -n "$match_tags" ]]; then
+            args+=(--match-tags "$match_tags")
         fi
 
-        if [[ -n "${{ inputs.pages_branch }}" ]]; then
-            args+=(--pages-branch "${{ inputs.pages_branch }}")
+        if [[ -n "$packages_with_index" ]]; then
+            args+=(--packages-with-index "$packages_with_index")
         fi
 
-        if [[ -n "${{ inputs.oci_registry_url }}" ]]; then
-            args+=(--oci-registry-url "${{ inputs.oci_registry_url }}")
+        if [[ -n "$pages_branch" ]]; then
+            args+=(--pages-branch "$pages_branch")
         fi
 
-        if [[ -n "${{ inputs.oci_username }}" ]]; then
-            args+=(--oci-username "${{ inputs.oci_username }}")
+        if [[ -n "$oci_registry_url" ]]; then
+            args+=(--oci-registry-url "$oci_registry_url")
         fi
 
-        if [[ -n "${{ inputs.oci_password }}" ]]; then
-            args+=(--oci-password "${{ inputs.oci_password }}")
+        if [[ -n "$oci_username" ]]; then
+            args+=(--oci-username "$oci_username")
         fi
 
-        if [ "${{ runner.arch }}" == "ARM64" ]; then
+        if [[ -n "$oci_password" ]]; then
+            args+=(--oci-password "$oci_password")
+        fi
+
+        if [ "$RUNNER_ARCH" == "ARM64" ]; then
             args+=(--use-arm "true")
         fi
         "$GITHUB_ACTION_PATH/cr.sh" "${args[@]}"

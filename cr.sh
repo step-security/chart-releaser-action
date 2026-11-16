@@ -19,7 +19,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-DEFAULT_CHART_RELEASER_VERSION=v1.9.0
+DEFAULT_CHART_RELEASER_VERSION=v1.10.0
 
 show_help() {
   cat <<EOF
@@ -29,6 +29,7 @@ Usage: $(basename "$0") <options>
     -v, --version                 The chart-releaser version to use (default: $DEFAULT_CHART_RELEASER_VERSION)"
         --config                  The path to the chart-releaser config file
     -d, --charts-dir              The charts directory (default: charts)
+        --charts                  Newline-separated chart directories to process without Git change detection
     -o, --owner                   The repo owner
     -r, --repo                    The repo name
         --pages-branch            The repo pages branch
@@ -51,6 +52,7 @@ main() {
   local version="$DEFAULT_CHART_RELEASER_VERSION"
   local config=
   local charts_dir=charts
+  local charts=
   local owner=
   local repo=
   local match_tags=
@@ -69,6 +71,11 @@ main() {
 
   parse_command_line "$@"
 
+  if [[ -n "$charts" && -n "$skip_packaging" ]]; then
+    echo "ERROR: '--charts' cannot be combined with '--skip-packaging'." >&2
+    exit 1
+  fi
+
   : "${CR_TOKEN:?Environment variable CR_TOKEN must be set}"
 
   local repo_root
@@ -76,13 +83,20 @@ main() {
   pushd "$repo_root" >/dev/null
 
   if [[ -z "$skip_packaging" ]]; then
-    echo 'Looking up latest tag...'
-    local latest_tag
-    latest_tag=$(lookup_latest_tag)
-
-    echo "Discovering changed charts since '$latest_tag'..."
+    local latest_tag=
     local changed_charts=()
-    readarray -t changed_charts <<<"$(lookup_changed_charts "$latest_tag")"
+    if [[ -n "$charts" ]]; then
+      echo 'Processing explicitly selected charts...'
+      local selected_charts
+      selected_charts=$(lookup_selected_charts "$charts")
+      readarray -t changed_charts <<<"$selected_charts"
+    else
+      echo 'Looking up latest tag...'
+      latest_tag=$(lookup_latest_tag)
+
+      echo "Discovering changed charts since '$latest_tag'..."
+      readarray -t changed_charts <<<"$(lookup_changed_charts "$latest_tag")"
+    fi
 
     if [[ -n "${changed_charts[*]}" ]]; then
       install_chart_releaser
@@ -93,13 +107,20 @@ main() {
       rm -rf .cr-index
       mkdir -p .cr-index
 
+      local packaged_chart_versions=()
       for chart in "${changed_charts[@]}"; do
         if [[ -d "$chart" ]]; then
-          package_chart "$chart"
+          package_chart "$chart" || return 1
         else
           echo "Nothing to do. No chart changes detected."
         fi
       done
+
+      local chart_versions
+      chart_versions=$(
+        IFS=,
+        echo "${packaged_chart_versions[*]}"
+      )
 
       release_charts
       push_charts
@@ -109,7 +130,7 @@ main() {
         echo "${changed_charts[*]}"
       )" >changed_charts.txt
 
-      echo "chart_version=${latest_tag}" >chart_version.txt
+      echo "chart_version=$chart_versions" >chart_version.txt
     else
       echo "Nothing to do. No chart changes detected."
       echo "changed_charts=" >changed_charts.txt
@@ -150,6 +171,16 @@ parse_command_line() {
         shift
       else
         echo "ERROR: '-v|--version' cannot be empty." >&2
+        show_help
+        exit 1
+      fi
+      ;;
+    --charts)
+      if [[ -n "${2:-}" ]]; then
+        charts="$2"
+        shift
+      else
+        echo "ERROR: '--charts' cannot be empty." >&2
         show_help
         exit 1
       fi
@@ -359,6 +390,37 @@ lookup_latest_tag() {
   fi
 }
 
+lookup_selected_charts() {
+  local chart resolved existing duplicate
+  local selected=() resolved_paths=()
+  while IFS= read -r chart || [[ -n "$chart" ]]; do
+    chart=${chart%$'\r'}
+    [[ -z "${chart//[[:space:]]/}" ]] && continue
+    if [[ ! -d "$chart" || ! -f "$chart/Chart.yaml" ]]; then
+      echo "ERROR: Selected chart '$chart' must be a directory containing Chart.yaml." >&2
+      return 1
+    fi
+    resolved=$(cd "$chart" && pwd -P)
+    duplicate=false
+    for existing in "${resolved_paths[@]}"; do
+      if [[ "$existing" == "$resolved" ]]; then
+        duplicate=true
+        break
+      fi
+    done
+    if [[ "$duplicate" = false ]]; then
+      selected+=("$chart")
+      resolved_paths+=("$resolved")
+    fi
+  done <<<"$1"
+
+  if [[ ${#selected[@]} -eq 0 ]]; then
+    echo "ERROR: '--charts' must contain at least one chart directory." >&2
+    return 1
+  fi
+  printf '%s\n' "${selected[@]}"
+}
+
 filter_charts() {
   while read -r chart; do
     [[ ! -d "$chart" ]] && continue
@@ -385,14 +447,73 @@ lookup_changed_charts() {
 
 package_chart() {
   local chart="$1"
+  local tmp_dir=".cr-package-tmp"
 
-  local args=("$chart" --package-path .cr-release-packages)
+  local args=("$chart" --package-path "$tmp_dir")
   if [[ -n "$config" ]]; then
     args+=(--config "$config")
   fi
 
+  rm -rf "$tmp_dir" || return 1
+  mkdir -p "$tmp_dir" || return 1
+
   echo "Packaging chart '$chart'..."
-  cr package "${args[@]}"
+  cr package "${args[@]}" || return 1
+
+  local packages=("$tmp_dir"/*.tgz)
+  if [[ ${#packages[@]} -ne 1 || ! -f "${packages[0]}" ]]; then
+    echo "ERROR: Expected exactly one package for '$chart' in $tmp_dir" >&2
+    return 1
+  fi
+
+  local packaged_identity
+  if ! packaged_identity=$(lookup_packaged_chart_identity "${packages[0]}"); then
+    echo "ERROR: Failed to read packaged chart metadata for '$chart'" >&2
+    return 1
+  fi
+
+  if [[ "$(basename "${packages[0]}" .tgz)" != "$packaged_identity" ]]; then
+    echo "ERROR: Packaged chart filename does not match '$packaged_identity'" >&2
+    return 1
+  fi
+
+  cp -f "${packages[0]}" .cr-release-packages/ || return 1
+  if [[ -f "${packages[0]}.prov" ]]; then
+    cp -f "${packages[0]}.prov" .cr-release-packages/ || return 1
+  fi
+  packaged_chart_versions+=("$packaged_identity")
+  rm -rf "$tmp_dir"
+}
+
+lookup_packaged_chart_identity() {
+  local chart="$1"
+  local metadata metadata_path
+
+  metadata_path=$(tar -tzf "$chart" | awk '
+    /^[^\/]+\/Chart\.yaml$/ { print; count++ }
+    END { if (count != 1) exit 1 }
+  ') || return 1
+  metadata=$(tar -xOzf "$chart" "$metadata_path") || return 1
+
+  awk '
+    function scalar(value) {
+      sub(/^[^:]*:[[:space:]]*/, "", value)
+      sub(/[[:space:]]+#.*$/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      if (value ~ /^".*"$/ || value ~ /^\047.*\047$/) {
+        value = substr(value, 2, length(value) - 2)
+      }
+      return value
+    }
+    /^name:/ { name = scalar($0) }
+    /^version:/ { version = scalar($0) }
+    END {
+      if (name !~ /^[[:alnum:]][[:alnum:]._-]*$/ || version !~ /^[[:alnum:]][[:alnum:].+_-]*$/) {
+        exit 1
+      }
+      print name "-" version
+    }
+  ' <<<"$metadata"
 }
 
 release_charts() {
@@ -447,7 +568,7 @@ update_index() {
     args+=(--config "$config")
   fi
   if [[ "$packages_with_index" = true ]]; then
-    args+=(--packages-with-index --index-path .)
+    args+=(--packages-with-index)
   fi
   if [[ -n "$pages_branch" ]]; then
     args+=(--pages-branch "$pages_branch")
