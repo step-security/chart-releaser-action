@@ -110,6 +110,30 @@ generate-release-notes: false
 
 The file path is relative to each chart root, such as `charts/my-chart/RELEASE_NOTES.md`, and the file must be included in the chart package. The CLI uses its entire contents as the release body; it does not automatically extract a version section from a full changelog. If the file is absent, the chart description is used instead. Set `generate-release-notes: true` to append GitHub-generated notes to that body. The equivalent environment variables are `CR_RELEASE_NOTES_FILE` and `CR_GENERATE_RELEASE_NOTES`.
 
+### Release notes
+
+To include GitHub-generated changelog text and pull request links in releases, enable `CR_GENERATE_RELEASE_NOTES`:
+
+```yaml
+- name: Run chart-releaser
+  uses: helm/chart-releaser-action@v1.8.0
+  env:
+    CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+    CR_GENERATE_RELEASE_NOTES: "true"
+```
+
+The default CLI v1.9.0 compares against the previous tag of the same chart when one can be identified. First releases, unsupported release-name templates, and lookup failures fall back to GitHub's default generation behavior. Generated notes cover the commit range between tags; they do not filter pull requests by chart directory, so a monorepo release can include changes to other charts.
+
+For notes specific to each chart, prepare a Markdown file inside each chart before packaging, then select it with a config file:
+
+```yaml
+# cr.yaml, passed through the action's config input
+release-notes-file: RELEASE_NOTES.md
+generate-release-notes: false
+```
+
+The file path is relative to each chart root, such as `charts/my-chart/RELEASE_NOTES.md`, and the file must be included in the chart package. The CLI uses its entire contents as the release body; it does not automatically extract a version section from a full changelog. If the file is absent, the chart description is used instead. Set `generate-release-notes: true` to append GitHub-generated notes to that body. The equivalent environment variables are `CR_RELEASE_NOTES_FILE` and `CR_GENERATE_RELEASE_NOTES`.
+
 ### Example Workflow
 
 Create a workflow (eg: `.github/workflows/release.yml`):
@@ -180,6 +204,31 @@ Use the `config` input to set the CLI's `index-path` and `pages-index-path` opti
 ```yaml
 - name: Run chart-releaser
   uses: step-security/chart-releaser-action@v1
+  with:
+    config: cr.yaml
+    pages_branch: gh-pages
+  env:
+    CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+```
+
+`cr.yaml`:
+
+```yaml
+index-path: site/static/index.yaml
+pages-index-path: docs/index.yaml
+```
+
+`index-path` is the generated file in the workflow checkout, which a later site-build step can use. `pages-index-path` is the index location relative to the publishing branch; the example publishes `docs/index.yaml` on `gh-pages`. Set `pages_branch` to another existing branch if your documentation source lives there, and use a path such as `docs/static/index.yaml` if needed. Both paths should end in `index.yaml`. If another workflow rebuilds the published site, include the index in its build output so it is preserved.
+
+For a custom publishing subdirectory, leave `packages_with_index` disabled (the default), so chart URLs point to GitHub release assets. When `packages_with_index: true` is used, the CLI stores chart archives at the publishing branch root; keep `pages-index-path: index.yaml` so its relative package URLs resolve correctly. You can still customize the local `index-path`.
+
+#### Custom index locations
+
+Use the `config` input to set the CLI's `index-path` and `pages-index-path` options:
+
+```yaml
+- name: Run chart-releaser
+  uses: helm/chart-releaser-action@v1.8.0
   with:
     config: cr.yaml
     pages_branch: gh-pages
